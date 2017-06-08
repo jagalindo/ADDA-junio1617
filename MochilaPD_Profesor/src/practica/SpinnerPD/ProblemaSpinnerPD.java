@@ -23,43 +23,61 @@ public class ProblemaSpinnerPD implements ProblemaPD<Multiset<PiezaSpinner>, Int
 	
 	private Double spinAcumulado;
 	private Double spinSolucion = Double.MIN_VALUE;
-	private int[] numPiezas;//piezas que me quedan por comprar
-
-	private Integer a;
+	private static int MaxNumCC,MaxNumRS,MaxNumRC;
+	private int contadorCC,contadorRS,contadorRC;
+	
 	public static ProblemaSpinnerPD create(String fichero, Integer c) {	
 		ProblemaSpinner.leePiezasDisponibles(fichero);
 		ProblemaSpinnerPD.piezas = ProblemaSpinner.getPiezasDisponibles();
-	   
-		Integer max = ProblemaSpinnerPD.piezas.stream().max(Comparator.comparing(x -> x.getTipo())).get().getTipo();
-		int[] numPiezas = new int[max+1];
+		
 		for(PiezaSpinner p: ProblemaSpinnerPD.piezas){
-			numPiezas[p.getTipo()]=p.getNumMaxDeUnidades();
+			if(p.getTipo()==0){
+				ProblemaSpinnerPD.MaxNumCC=p.getNumMaxDeUnidades();
+			}else if(p.getTipo()==1){
+				ProblemaSpinnerPD.MaxNumRS=p.getNumMaxDeUnidades();
+			}else if(p.getTipo()==2){
+				ProblemaSpinnerPD.MaxNumRC=p.getNumMaxDeUnidades();
+			}
 		}
-		return new ProblemaSpinnerPD(0, c, 0.,numPiezas,0);
+		
+		return new ProblemaSpinnerPD(0, c, 0.,0,0,0);
 	}
 	
-	public static ProblemaSpinnerPD create(int index,int dineroRestante,double spinAcumulado,int[] numPiezas, Integer a) {
-		ProblemaSpinnerPD p = new ProblemaSpinnerPD(index, dineroRestante,spinAcumulado, numPiezas,a);
+	public static ProblemaSpinnerPD create(int index,int dineroRestante,double spinAcumulado,int contadorCC,int contadorRS,int contadorRC) {
+		ProblemaSpinnerPD p = new ProblemaSpinnerPD(index, dineroRestante,spinAcumulado,  contadorCC, contadorRS, contadorRC);
 		//System.out.println(p);
 		
 		return p;
 	}
 	
-	private ProblemaSpinnerPD(int index, int dineroRestante, double spinAcumulado,int[] numPiezas, Integer a) {
+	private ProblemaSpinnerPD(int index, int dineroRestante, double spinAcumulado,int contadorCC,int contadorRS,int contadorRC) {
 		//inicializamos el número de piezas
-		this.numPiezas=numPiezas;
+		this.contadorCC=contadorCC;
+		this.contadorRC=contadorRC;
+		this.contadorRS=contadorRS;
 		this.index = index;
 		this.dineroRestante = dineroRestante;
 		this.spinAcumulado = spinAcumulado;
-		this.a=a;
 	}	
 	
-	private Boolean constraints(Integer a) {
-		boolean res=a*piezas.get(index).getPrecio() <= dineroRestante;
-		res=res&& numPiezas[piezas.get(index).getTipo()]>=a;
+	private Boolean constraints(Integer x) {
+		boolean res=x*piezas.get(index).getPrecio() <= dineroRestante;
+		res=res&& verificaCompra(piezas.get(index).getTipo(),x);
 		return res;
 	}	
 	
+	private boolean verificaCompra(Integer tipo, Integer a2) {
+		boolean res=false;
+		if(tipo==0){
+			res=contadorCC+a2<=MaxNumCC;
+		}else if(tipo==1){
+			res=contadorRS+a2<=MaxNumRS;
+		}else if(tipo==2){
+			res=contadorRC+a2<=MaxNumRC;
+		}
+		return res;
+	}
+
 	@Override
 	public Tipo getTipo(){
 		return Tipo.Max;
@@ -72,13 +90,11 @@ public class ProblemaSpinnerPD implements ProblemaPD<Multiset<PiezaSpinner>, Int
 	
 	@Override
 	public List<Integer> getAlternativas() {
-
 		List<Integer> ls = IntStream.rangeClosed(0, piezas.get(this.index).getNumMaxDeUnidades() )
 				.filter(x->this.constraints(x))
 				.boxed()
 				.collect(Collectors.toList());
 		Collections.reverse(ls);
-		//System.out.println(piezas.get(index)+" "+ls);
 		return ls;
 	}
 	
@@ -90,15 +106,22 @@ public class ProblemaSpinnerPD implements ProblemaPD<Multiset<PiezaSpinner>, Int
 	
 	@Override
 	public Sp<Integer> getSolucionCasoBase() {
-		int piezasFlatantes=0;
-		for(int i:numPiezas){piezasFlatantes+=i;}
+		
+		//si no he comprado todas las piezas
+		if (ProblemaSpinnerPD.MaxNumCC-contadorCC !=0 || ProblemaSpinnerPD.MaxNumRC-contadorRC!=0 ||ProblemaSpinnerPD.MaxNumRS-contadorRS !=0){
+			return null;
+		}
 		Integer precio = piezas.get(index).getPrecio();//precio actual
-		if(piezasFlatantes>0){return null;}
-		int num = Math.min(dineroRestante/precio,piezas.get(index).getNumMaxDeUnidades()) ;
-		num= Math.min(num, numPiezas[piezas.get(index).getTipo()]);
-		Double val = (double) this.a*piezas.get(index).getSpin();
+
+		int num = dineroRestante/precio ;// cuantas puedo comprar
+		switch(piezas.get(index).getTipo()){
+			case 0: num= Math.min(num, ProblemaSpinnerPD.MaxNumCC-this.contadorCC);break;
+			case 1: num= Math.min(num, ProblemaSpinnerPD.MaxNumRS-this.contadorRS);break;
+			case 2: num= Math.min(num, ProblemaSpinnerPD.MaxNumRC-this.contadorRC);break;
+		}
+				
+		Double val = (double) num*piezas.get(index).getSpin();
 		spinSolucion = val;
-		//alt,propiedad
 		return Sp.create(num, val);
 	}
 
@@ -109,19 +132,20 @@ public class ProblemaSpinnerPD implements ProblemaPD<Multiset<PiezaSpinner>, Int
 		Integer dineroRestante = this.dineroRestante-coste;
 		Double spinAcumulado = this.spinAcumulado+a*piezas.get(index).getSpin();
 		
-		Integer nuevoNumPiezas=this.numPiezas[piezas.get(index).getTipo()]-a;
-		//actualizar lista de piezas restantes
+		int contadorCCtmp=contadorCC;
+		int contadorRCtmp=contadorRC;
+		int contadorRStmp=contadorRS;		
 		
-		int[] numPiezas= new int[this.numPiezas.length];
-		for(int i=0;i<this.numPiezas.length;i++){
-			if(i!=piezas.get(index).getTipo()){
-				numPiezas[i]= this.numPiezas[i];
-			}else {
-				numPiezas[piezas.get(index).getTipo()]=nuevoNumPiezas;
-			}
+		if(piezas.get(index).getTipo() ==0){
+			contadorCCtmp+=a;
+		}else if(piezas.get(index).getTipo() ==1){
+			contadorRStmp+=a;
+		}else if(piezas.get(index).getTipo() ==2){
+			contadorRCtmp+=a;
 		}
+			
 		
-		return ProblemaSpinnerPD.create(index+1,dineroRestante,spinAcumulado,numPiezas,a);
+		return ProblemaSpinnerPD.create(index+1,dineroRestante,spinAcumulado,contadorCCtmp,contadorRStmp,contadorRCtmp);
 	}
 
 	@Override
@@ -228,10 +252,8 @@ public class ProblemaSpinnerPD implements ProblemaPD<Multiset<PiezaSpinner>, Int
 
 	@Override
 	public String toString() {
-		String str= "[";
-		for(int i:numPiezas){
-			str+=(i+",");
-		}
+		String str= "["+contadorCC+","+contadorRS+","+contadorRC+"]";
+		
 		str+="]";
 		return "( i:" + index + ", um:"
 				+ dineroRestante + " "+str+" "+piezas.get(index)+ ")";
